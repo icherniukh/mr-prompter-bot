@@ -4,6 +4,8 @@ A functional Telegram bot. Send it a batch of images and it returns the same
 images with watermarks, logos, text overlays, captions and labels removed —
 each image processed independently. No prompt or instructions required.
 
+**Current path for friends (recommended):** Use the standalone Gemini 2.5 Flash Image tool below. No user keys, no 25-image limit, full fidelity.
+
 ```mermaid
 flowchart LR
     U([User]) -- sends images --> B[Bot]
@@ -76,18 +78,20 @@ A future lower-cost architecture may use a two-stage pipeline (cheap detection m
 - Pasted keys are deleted from the chat on a best-effort basis, and logs redact
   anything matching an OpenRouter/OpenAI key pattern.
 
-## Quick start
+## Quick start (Gemini 2.5 free tool — current recommended)
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# fill in TELEGRAM_BOT_TOKEN, ENCRYPTION_KEY, and HOST_OPENROUTER_KEY
-python -m src.main
+# add your GEMINI_API_KEY (get from https://aistudio.google.com/app/apikey)
+python scripts/gemini_25_free_watermark_remover.py /path/to/images/
 ```
 
-Set the bot's commands and disable group privacy as needed via BotFather.
+The old Telegram bot (OpenRouter-based) is kept as dead code for now.
+
+For the legacy Telegram bot: see "Running in Production" below.
 
 ## Running in Production
 
@@ -139,13 +143,27 @@ The service is configured to restart automatically on failure.
 
 ### Error Telemetry
 
-All uncaught errors are permanently logged to:
+- Gemini 2.5 free tool: `data/logs/gemini_free_errors.log`
+- Legacy Telegram bot: `data/logs/errors.log`
 
-```
-data/logs/errors.log
+Both use rotating file handlers.
+
+### Running the Gemini 2.5 free tool
+
+```bash
+# One-shot
+python scripts/gemini_25_free_watermark_remover.py photo.jpg folder/ --prompt-file prompts/conservative-watermark-removal.txt
+
+# With the run script (loads .env)
+./run_bot.sh --gemini /path/to/images/
+# (edit run_bot.sh if you want it to default to Gemini mode)
 ```
 
-(with rotation). This file is very useful for post-mortem analysis when something goes wrong in production.
+For systemd, point ExecStart at a small wrapper that calls the Gemini script (or run it manually / via cron).
+
+### Running the legacy Telegram bot (OpenRouter)
+
+Use the sections below (run_bot.sh + systemd still point at `src.main`).
 
 ## Stack
 

@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 #
-# Simple runner script for Mr Prompter Bot
-# Usage: ./run_bot.sh
+# Simple runner script
+# Usage:
+#   ./run_bot.sh                    # legacy Telegram bot (OpenRouter)
+#   ./run_bot.sh --gemini <images>  # Gemini 2.5 free tool (recommended)
 #
 
 set -euo pipefail
@@ -29,4 +31,11 @@ if [ -f ".env" ]; then
 fi
 
 echo "Starting Mr Prompter Bot..."
-exec python -m src.main
+
+if [[ "${1:-}" == "--gemini" ]]; then
+    shift
+    echo "Running Gemini 2.5 free tool..."
+    exec python scripts/gemini_25_free_watermark_remover.py "$@"
+else
+    exec python -m src.main
+fi
