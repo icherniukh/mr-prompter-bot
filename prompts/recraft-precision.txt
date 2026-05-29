@@ -1,0 +1,5 @@
+Precisely remove the artificial post-production watermark or logo visible in this image. Leave every piece of real-world text, signage, and environmental detail completely untouched.
+
+Reconstruct the cleaned area with perfect fidelity to the surrounding pixels: match texture, color, lighting, shadow, grain, and perspective exactly so there is zero visible trace of the edit.
+
+Maintain 100% identical image dimensions, aspect ratio, and resolution to the original. No creative changes, no style shifts, no content invention outside the watermark area.

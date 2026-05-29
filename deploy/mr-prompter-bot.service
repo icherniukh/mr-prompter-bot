@@ -1,0 +1,23 @@
+[Unit]
+Description=Mr Prompter Bot (Telegram watermark remover)
+After=network.target
+
+[Service]
+Type=simple
+User=ivan
+WorkingDirectory=/home/ivan/proj/mr-prompter-bot
+ExecStart=/home/ivan/proj/mr-prompter-bot/run_bot.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=mr-prompter-bot
+
+# Security hardening (optional but recommended)
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

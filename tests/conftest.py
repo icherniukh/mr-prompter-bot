@@ -5,3 +5,9 @@ from cryptography.fernet import Fernet
 os.environ.setdefault("ENCRYPTION_KEY", Fernet.generate_key().decode())
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test:token")
 os.environ.setdefault("HOST_OPENROUTER_KEY", "sk-or-test-hostkey")
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers", "gemini_free: tests that make real calls to Gemini free tier (expensive, rate limited)"
+    )

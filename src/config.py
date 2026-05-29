@@ -55,10 +55,25 @@ FREE_TIER_LIMIT: int = int(os.getenv("FREE_TIER_LIMIT", "25"))
 # Override with a comma-separated MODEL_SHORTLIST env var.
 #
 # NOTE (2026-05-29): The list below contains the models we are currently
-# evaluating for watermark/overlay removal quality. Many of these IDs are
-# experimental or may not actually support image output / editing. Real
-# production use requires testing which ones (if any) reliably return cleaned
-# images instead of errors or text responses.
+# evaluating for watermark/overlay removal quality.
+#
+# For cost-sensitive / high-volume use, prefer the cheaper models:
+#   - black-forest-labs/flux.2-klein-4b (very cheap + fast)
+#   - sourceful/riverflow-v2-fast
+#   - recraft/recraft-v4.1-utility (best strength control for conservative edits)
+#
+# A future architecture may split this into a cheap detection stage + targeted
+# masked inpainting for even lower cost.
+
+# Recommended cheap models for cost-sensitive / high-volume use (as of 2026 research).
+# These are the primary models to experiment with for watermark removal.
+# All support pure image output (modalities=["image"]).
+CHEAP_MODELS = [
+    "black-forest-labs/flux.2-klein-4b",      # Currently one of the cheapest strong options
+    "sourceful/riverflow-v2-fast",            # Excellent speed/price balance
+    "recraft/recraft-v4.1-utility",           # Best control via image_config.strength for conservative edits
+]
+
 _DEFAULT_SHORTLIST = (
     "google/gemini-3.1-flash-image-preview,"
     "openai/gpt-5.4-image-2,"

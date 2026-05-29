@@ -10,3 +10,17 @@ data/secret.key
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Runtime / test artifacts (never commit user images, results, or real logs)
+data/test_images/
+data/test_results/
+data/tmp/
+data/logs/
+
+# One-off test images and scratch files at repo root
+image-*.jpg
+test_gemini_free_minimal.py
+
+# macOS junk
+.DS_Store
+**/.DS_Store

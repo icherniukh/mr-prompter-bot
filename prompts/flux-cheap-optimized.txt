@@ -1,0 +1,5 @@
+Remove only the unwanted artificial watermark, logo, or text overlay that was added to this photo after capture. Do not touch any real text or signage that belongs in the scene (building names, numbers, architectural lettering, etc.).
+
+Carefully reconstruct the area under the removed overlay by perfectly matching the surrounding background: continue the exact wood grain, brick texture, sky gradient, fabric pattern, lighting, shadows, and perspective. The repair must be completely seamless and invisible.
+
+Output the image at exactly the same dimensions, resolution, and aspect ratio as the input. No cropping, resizing, padding, or framing changes allowed. Photorealistic, natural result only.

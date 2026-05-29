@@ -34,19 +34,18 @@ A plain text/vision LLM can only read an image, so this bot uses OpenRouter
 **image-output (editing) models**.
 
 Current shortlist (in `src/config.py` and `MODEL_SHORTLIST` env var) contains
-the models we are actively evaluating for watermark/overlay removal quality:
+the models we are actively evaluating for watermark/overlay removal quality.
 
-- `google/gemini-3.1-flash-image-preview`
-- `openai/gpt-5.4-image-2`
-- `x-ai/grok-imagine-image-quality`
-- `black-forest-labs/flux.2-klein-4b`
-- `sourceful/riverflow-v2-fast`
-- `bytedance-seed/seedream-4.5`
+**Cost-effective recommendations** (as of late 2026 research):
+- `black-forest-labs/flux.2-klein-4b` — Currently one of the cheapest strong options.
+- `sourceful/riverflow-v2-fast` — Excellent speed/price balance.
+- `recraft/recraft-v4.1-utility` — Best control via `image_config.strength` for conservative edits that don't destroy real signage.
 
-**Important**: Not all of these may actually support returning edited images.
-Real usage requires empirical testing to determine which (if any) reliably
-work for this task. Only image-output / image-editing models are valid in the
-shortlist.
+The more expensive models (Gemini Pro previews, GPT-5.4 Image, Grok Imagine, FLUX.2 Pro/Max) can be used when higher quality is required.
+
+**Important**: Real usage requires empirical testing. Only image-output / image-editing models are valid in the shortlist.
+
+A future lower-cost architecture may use a two-stage pipeline (cheap detection model → precise masked inpainting) instead of full image-to-image on every request.
 
 ## Free tier
 
@@ -89,6 +88,64 @@ python -m src.main
 ```
 
 Set the bot's commands and disable group privacy as needed via BotFather.
+
+## Running in Production
+
+### Using the run script (recommended)
+
+A convenience script is provided:
+
+```bash
+chmod +x run_bot.sh
+./run_bot.sh
+```
+
+This script:
+- Activates the virtual environment (if `.venv` or `venv` exists)
+- Loads variables from `.env`
+- Starts the bot
+
+### Systemd autostart (recommended for servers)
+
+1. Copy the example service file:
+
+   ```bash
+   sudo cp deploy/mr-prompter-bot.service /etc/systemd/system/
+   ```
+
+2. Edit it to match your setup (especially `User` and `WorkingDirectory`):
+
+   ```bash
+   sudo nano /etc/systemd/system/mr-prompter-bot.service
+   ```
+
+3. Enable and start:
+
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable mr-prompter-bot
+   sudo systemctl start mr-prompter-bot
+   ```
+
+4. Useful commands:
+
+   ```bash
+   sudo systemctl status mr-prompter-bot
+   sudo journalctl -u mr-prompter-bot -f
+   sudo systemctl restart mr-prompter-bot
+   ```
+
+The service is configured to restart automatically on failure.
+
+### Error Telemetry
+
+All uncaught errors are permanently logged to:
+
+```
+data/logs/errors.log
+```
+
+(with rotation). This file is very useful for post-mortem analysis when something goes wrong in production.
 
 ## Stack
 

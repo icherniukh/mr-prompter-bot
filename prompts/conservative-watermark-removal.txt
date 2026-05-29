@@ -1,0 +1,7 @@
+Carefully remove ONLY artificial watermarks, logos, text overlays, captions, labels, timestamps, signatures, and other superimposed graphics that appear to have been added after the original photo was taken (such as stock photo watermarks or post-processing branding).
+
+DO NOT remove, alter, or inpaint over any text, signs, logos, numbers, or markings that are physically part of the real-world scene, including building names, addresses, entrance signage, architectural details, or any other legitimate environmental text.
+
+For the areas being cleaned, seamlessly reconstruct by extending the exact surrounding textures, lighting, shadows, colors, perspective, grain, noise, and material properties so the result looks completely natural and untouched. Make the edit invisible with no artifacts, halos, or inconsistencies.
+
+CRITICAL: Preserve the exact original image dimensions, aspect ratio, resolution, composition, framing, and pixel fidelity. Do not crop, pad, resize, rotate, recolor, stylize, or change anything about the overall image structure. Return only the cleaned image at precisely the same size and proportions as the input.
