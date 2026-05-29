@@ -1,0 +1,7 @@
+{
+  "database": "dolt",
+  "backend": "dolt",
+  "dolt_mode": "embedded",
+  "dolt_database": "mr_prompter_bot",
+  "project_id": "7a50c29c-9a53-4140-8b3b-32fe1a10bd23"
+}
