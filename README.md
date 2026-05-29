@@ -143,10 +143,12 @@ The service is configured to restart automatically on failure.
 
 ### Error Telemetry
 
+All uncaught errors are permanently logged to disk for future analysis:
+
 - Gemini 2.5 free tool: `data/logs/gemini_free_errors.log`
 - Legacy Telegram bot: `data/logs/errors.log`
 
-Both use rotating file handlers.
+Both use rotating file handlers (5 MB files, several backups). These files are very useful for post-mortem analysis when something goes wrong in production.
 
 ### Running the Gemini 2.5 free tool
 
