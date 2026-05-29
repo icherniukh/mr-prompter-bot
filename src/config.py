@@ -53,7 +53,20 @@ FREE_TIER_LIMIT: int = int(os.getenv("FREE_TIER_LIMIT", "25"))
 # image (image-output / image-editing models). A plain text/vision model cannot
 # return a cleaned image, so the shortlist must only contain image-output models.
 # Override with a comma-separated MODEL_SHORTLIST env var.
-_DEFAULT_SHORTLIST = "google/gemini-2.5-flash-image,google/gemini-2.5-flash-image-preview"
+#
+# NOTE (2026-05-29): The list below contains the models we are currently
+# evaluating for watermark/overlay removal quality. Many of these IDs are
+# experimental or may not actually support image output / editing. Real
+# production use requires testing which ones (if any) reliably return cleaned
+# images instead of errors or text responses.
+_DEFAULT_SHORTLIST = (
+    "google/gemini-3.1-flash-image-preview,"
+    "openai/gpt-5.4-image-2,"
+    "x-ai/grok-imagine-image-quality,"
+    "black-forest-labs/flux.2-klein-4b,"
+    "sourceful/riverflow-v2-fast,"
+    "bytedance-seed/seedream-4.5"
+)
 MODEL_SHORTLIST: list[str] = _parse_shortlist(os.getenv("MODEL_SHORTLIST", _DEFAULT_SHORTLIST))
 
 DEFAULT_MODEL: str = os.getenv("DEFAULT_MODEL", MODEL_SHORTLIST[0])

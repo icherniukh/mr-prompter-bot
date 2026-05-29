@@ -154,3 +154,67 @@ async def test_no_host_key_blocks_free_users(fresh_db, monkeypatch):
     await handlers.handle_image(upd, None)
     assert called == []
     assert any("/setup" in r for r in upd.message.replies)
+
+
+# ── Batch independence / no-collage tests ────────────────────────────────────
+
+
+async def test_multiple_images_are_processed_as_separate_independent_calls(fresh_db, monkeypatch):
+    """When a user sends several images (as Telegram delivers them one message at a time),
+    each image must trigger its own call to remove_overlays.
+
+    The model must never see a 'collage' or multi-image request for one logical user batch.
+    """
+    monkeypatch.setattr(handlers, "HOST_OPENROUTER_KEY", "sk-or-host")
+    monkeypatch.setattr(handlers, "FREE_TIER_LIMIT", 10)
+
+    calls = []  # (image_bytes, model)
+
+    async def fake_remove(api_key, image_bytes, model, mime_type):
+        calls.append((image_bytes, model))
+        return b"CLEANED-" + image_bytes[:4]
+
+    monkeypatch.setattr(handlers, "remove_overlays", fake_remove)
+
+    images = [b"image-one-data", b"image-two-data", b"image-three-data"]
+
+    for img in images:
+        upd = FakeUpdate(uid=99, photo_bytes=img)
+        await handlers.handle_image(upd, None)
+        assert upd.message.documents_sent == [b"CLEANED-" + img[:4]]
+
+    # Exactly 3 independent calls, each with its own distinct image bytes
+    assert len(calls) == 3
+    assert calls[0][0] == b"image-one-data"
+    assert calls[1][0] == b"image-two-data"
+    assert calls[2][0] == b"image-three-data"
+
+    # All used the same model (no weird cross-image payload construction)
+    assert all(c[1] == "google/gemini-3.1-flash-image-preview" for c in calls)
+
+
+async def test_even_concurrent_messages_result_in_separate_model_calls(fresh_db, monkeypatch):
+    """Even under concurrent message handling (realistic for albums or rapid sends),
+    we still get one remove_overlays call per image, never a combined collage.
+    """
+    import asyncio
+
+    monkeypatch.setattr(handlers, "HOST_OPENROUTER_KEY", "sk-or-host")
+    monkeypatch.setattr(handlers, "FREE_TIER_LIMIT", 10)
+
+    call_count = 0
+
+    async def slow_fake_remove(api_key, image_bytes, model, mime_type):
+        nonlocal call_count
+        call_count += 1
+        await asyncio.sleep(0.01)  # simulate real latency
+        return b"CLEANED"
+
+    monkeypatch.setattr(handlers, "remove_overlays", slow_fake_remove)
+
+    # Simulate 5 images arriving "at the same time"
+    updates = [FakeUpdate(uid=123, photo_bytes=f"img-{i}".encode()) for i in range(5)]
+
+    await asyncio.gather(*(handlers.handle_image(u, None) for u in updates))
+
+    assert call_count == 5, "Each image message must produce exactly one model call"

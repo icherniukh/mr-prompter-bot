@@ -31,9 +31,22 @@ A single fixed instruction drives every call (see `REMOVAL_INSTRUCTION` in
 
 Removing a watermark means *returning a new, edited image* — not describing one.
 A plain text/vision LLM can only read an image, so this bot uses OpenRouter
-**image-output (editing) models**. The curated shortlist defaults to Google's
-`gemini-2.5-flash-image` ("nano-banana"). Only image-output models belong in
-`MODEL_SHORTLIST`; a text model will fail to return an image.
+**image-output (editing) models**.
+
+Current shortlist (in `src/config.py` and `MODEL_SHORTLIST` env var) contains
+the models we are actively evaluating for watermark/overlay removal quality:
+
+- `google/gemini-3.1-flash-image-preview`
+- `openai/gpt-5.4-image-2`
+- `x-ai/grok-imagine-image-quality`
+- `black-forest-labs/flux.2-klein-4b`
+- `sourceful/riverflow-v2-fast`
+- `bytedance-seed/seedream-4.5`
+
+**Important**: Not all of these may actually support returning edited images.
+Real usage requires empirical testing to determine which (if any) reliably
+work for this task. Only image-output / image-editing models are valid in the
+shortlist.
 
 ## Free tier
 
