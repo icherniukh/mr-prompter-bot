@@ -37,10 +37,21 @@ async def init_db() -> None:
                 api_key TEXT,
                 model TEXT,
                 free_used INTEGER NOT NULL DEFAULT 0,
+                output_format TEXT NOT NULL DEFAULT 'files',
+                upscale TEXT NOT NULL DEFAULT 'original',
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        # Migrations for existing databases.
+        for migration in [
+            "ALTER TABLE users ADD COLUMN output_format TEXT NOT NULL DEFAULT 'files'",
+            "ALTER TABLE users ADD COLUMN upscale TEXT NOT NULL DEFAULT 'original'",
+        ]:
+            try:
+                await db.execute(migration)
+            except Exception:
+                pass  # column already exists
         await db.commit()
     _enforce_db_permissions()
 
@@ -55,18 +66,21 @@ async def get_user(user_id: int) -> dict | None:
     """Return the user's record (with decrypted key), or None if not present."""
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT user_id, api_key, model, free_used FROM users WHERE user_id=?",
+            "SELECT user_id, api_key, model, free_used, output_format, upscale "
+            "FROM users WHERE user_id=?",
             (user_id,),
         ) as cur:
             row = await cur.fetchone()
     if not row:
         return None
-    user_id, enc_key, model, free_used = row
+    user_id, enc_key, model, free_used, output_format, upscale = row
     return {
         "user_id": user_id,
         "api_key": _decrypt(enc_key) if enc_key else None,
         "model": model,
         "free_used": free_used,
+        "output_format": output_format or "files",
+        "upscale": upscale or "original",
     }
 
 
@@ -76,6 +90,26 @@ async def set_api_key(user_id: int, api_key: str) -> None:
         await db.execute(
             "UPDATE users SET api_key=?, updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
             (_encrypt(api_key), user_id),
+        )
+        await db.commit()
+
+
+async def set_output_format(user_id: int, fmt: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _ensure_user(db, user_id)
+        await db.execute(
+            "UPDATE users SET output_format=?, updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
+            (fmt, user_id),
+        )
+        await db.commit()
+
+
+async def set_upscale(user_id: int, upscale: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _ensure_user(db, user_id)
+        await db.execute(
+            "UPDATE users SET upscale=?, updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
+            (upscale, user_id),
         )
         await db.commit()
 

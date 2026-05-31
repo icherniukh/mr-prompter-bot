@@ -1,7 +1,8 @@
 import io
 import logging
+import zipfile
 
-from telegram import Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, ConversationHandler
 
 from src import database as db
@@ -34,7 +35,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "labels — and send the cleaned versions back. No instructions needed.\n\n"
         f"🎁 Your first {FREE_TIER_LIMIT} images are on me. After that, run /setup "
         "to add your own OpenRouter key and keep going.\n\n"
-        "Commands: /status · /setup · /model · /forget",
+        "Commands: /status · /settings · /setup · /model · /forget",
         parse_mode="Markdown",
     )
 
@@ -48,6 +49,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         f"You get {FREE_TIER_LIMIT} free images. After that use /setup to add your "
         "own OpenRouter key.\n\n"
         "/status — see how many free images remain\n"
+        "/settings — output format and upscaling options\n"
         "/setup — add your OpenRouter API key\n"
         "/model — choose the AI model\n"
         "/forget — delete all your stored data",
@@ -139,6 +141,78 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     return ConversationHandler.END
 
 
+# ── /settings (inline keyboard) ──────────────────────────────────────────────
+
+_OUTPUT_LABELS = {"files": "Files", "zip": "ZIP archive", "photo": "Inline photos"}
+_UPSCALE_LABELS = {"original": "Keep original", "low": "Upscale (low)"}
+
+
+def _settings_keyboard(output_format: str, upscale: str) -> InlineKeyboardMarkup:
+    def _btn(label: str, cb: str, current: str, val: str) -> InlineKeyboardButton:
+        return InlineKeyboardButton(("✅ " if current == val else "") + label, callback_data=cb)
+
+    return InlineKeyboardMarkup([
+        [
+            _btn("Files", "sf:files", output_format, "files"),
+            _btn("ZIP", "sf:zip", output_format, "zip"),
+            _btn("Photos", "sf:photo", output_format, "photo"),
+        ],
+        [
+            _btn("Keep original", "su:original", upscale, "original"),
+            _btn("Upscale (low)", "su:low", upscale, "low"),
+        ],
+    ])
+
+
+def _settings_text(output_format: str, upscale: str) -> str:
+    return (
+        "⚙️ *Output Settings*\n\n"
+        f"📤 Format: *{_OUTPUT_LABELS[output_format]}*\n"
+        f"🔍 Upscaling: *{_UPSCALE_LABELS[upscale]}*\n\n"
+        "Tap a button to change:"
+    )
+
+
+async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user = await db.get_user(update.effective_user.id)
+    output_format = (user and user.get("output_format")) or "files"
+    upscale = (user and user.get("upscale")) or "original"
+    await update.message.reply_text(
+        _settings_text(output_format, upscale),
+        parse_mode="Markdown",
+        reply_markup=_settings_keyboard(output_format, upscale),
+    )
+
+
+async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = update.effective_user.id
+    data = query.data
+
+    if data.startswith("sf:"):
+        fmt = data[3:]
+        if fmt not in _OUTPUT_LABELS:
+            return
+        await db.set_output_format(user_id, fmt)
+    elif data.startswith("su:"):
+        upscale_val = data[3:]
+        if upscale_val not in _UPSCALE_LABELS:
+            return
+        await db.set_upscale(user_id, upscale_val)
+    else:
+        return
+
+    user = await db.get_user(user_id)
+    output_format = (user and user.get("output_format")) or "files"
+    upscale = (user and user.get("upscale")) or "original"
+    await query.edit_message_text(
+        _settings_text(output_format, upscale),
+        parse_mode="Markdown",
+        reply_markup=_settings_keyboard(output_format, upscale),
+    )
+
+
 # ── /model (standalone model picker) ─────────────────────────────────────────
 
 async def choose_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -148,6 +222,34 @@ async def choose_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
         parse_mode="Markdown",
     )
     return ASK_MODEL
+
+
+# ── ZIP flush job ────────────────────────────────────────────────────────────
+
+async def _flush_zip_job(context: ContextTypes.DEFAULT_TYPE) -> None:
+    buf_key = context.job.data["buf_key"]
+    chat_id = context.job.data["chat_id"]
+    buf = context.bot_data.pop(buf_key, None)
+    if not buf:
+        return
+    results = buf.get("results", [])
+    if not results:
+        return
+
+    if len(results) == 1:
+        img_bytes, ext = results[0]
+        bio = io.BytesIO(img_bytes)
+        bio.name = f"cleaned.{ext}"
+        await context.bot.send_document(chat_id=chat_id, document=bio, filename=f"cleaned.{ext}")
+        return
+
+    zf_buf = io.BytesIO()
+    with zipfile.ZipFile(zf_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for i, (img_bytes, ext) in enumerate(results, 1):
+            zf.writestr(f"cleaned_{i:03d}.{ext}", img_bytes)
+    zf_buf.seek(0)
+    zf_buf.name = "cleaned_images.zip"
+    await context.bot.send_document(chat_id=chat_id, document=zf_buf, filename="cleaned_images.zip")
 
 
 # ── Image processing ─────────────────────────────────────────────────────────
@@ -181,6 +283,7 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     user = await db.get_user(user_id)
     own_key = user["api_key"] if user else None
     model = (user and user["model"]) or DEFAULT_MODEL
+    output_format = (user and user.get("output_format")) or "files"
 
     # Decide which key to use and (for the free tier) reserve a slot.
     used_free_slot = False
@@ -211,16 +314,37 @@ async def handle_image(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await placeholder.edit_text("⚠️ Unexpected error processing that image.")
         return
 
-    ext = _pick_extension(mime_type)
-    bio = io.BytesIO(cleaned)
-    bio.name = f"cleaned.{ext}"
-    # Sent as a document to avoid Telegram re-compressing the cleaned result.
-    await update.message.reply_document(
-        document=bio,
-        filename=f"cleaned.{ext}",
-        reply_to_message_id=update.message.message_id,
-    )
     try:
         await placeholder.delete()
     except Exception:
         pass
+
+    ext = _pick_extension(mime_type)
+
+    if output_format == "zip" and context is not None:
+        group_id = getattr(update.message, "media_group_id", None) or str(update.message.message_id)
+        buf_key = f"zip_{user_id}_{group_id}"
+        buf = context.bot_data.setdefault(buf_key, {"results": [], "chat_id": user_id})
+        buf["results"].append((cleaned, ext))
+        job_name = f"flush_{buf_key}"
+        for job in context.job_queue.get_jobs_by_name(job_name):
+            job.schedule_removal()
+        context.job_queue.run_once(
+            _flush_zip_job,
+            2.5,
+            data={"buf_key": buf_key, "chat_id": user_id},
+            name=job_name,
+        )
+    elif output_format == "photo":
+        await update.message.reply_photo(
+            photo=io.BytesIO(cleaned),
+            reply_to_message_id=update.message.message_id,
+        )
+    else:
+        bio = io.BytesIO(cleaned)
+        bio.name = f"cleaned.{ext}"
+        await update.message.reply_document(
+            document=bio,
+            filename=f"cleaned.{ext}",
+            reply_to_message_id=update.message.message_id,
+        )

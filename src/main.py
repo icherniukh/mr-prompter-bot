@@ -7,6 +7,7 @@ from pathlib import Path
 from telegram import BotCommand
 from telegram.ext import (
     ApplicationBuilder,
+    CallbackQueryHandler,
     CommandHandler,
     ConversationHandler,
     MessageHandler,
@@ -71,6 +72,7 @@ async def _post_init(app) -> None:
     await app.bot.set_my_commands([
         BotCommand("start", "What this bot does"),
         BotCommand("status", "Free images remaining / current model"),
+        BotCommand("settings", "Configure output format and options"),
         BotCommand("setup", "Add your own OpenRouter API key"),
         BotCommand("model", "Choose the AI model"),
         BotCommand("forget", "Delete all your stored data"),
@@ -113,6 +115,8 @@ def main() -> None:
     app.add_handler(CommandHandler("start", handlers.start, filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("help", handlers.help_command, filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("status", handlers.status, filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("settings", handlers.settings, filters.ChatType.PRIVATE))
+    app.add_handler(CallbackQueryHandler(handlers.settings_callback, pattern=r"^s[fu]:"))
     app.add_handler(CommandHandler("forget", handlers.forget, filters.ChatType.PRIVATE))
     app.add_handler(build_setup_wizard())
 
