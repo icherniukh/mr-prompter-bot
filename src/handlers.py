@@ -1,6 +1,7 @@
 import io
 import logging
 import zipfile
+from datetime import date
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes, ConversationHandler
@@ -144,7 +145,6 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 # ── /settings (inline keyboard) ──────────────────────────────────────────────
 
 _OUTPUT_LABELS = {"files": "Files", "zip": "ZIP archive", "photo": "Inline photos"}
-_UPSCALE_LABELS = {"original": "Keep original", "low": "Upscale (low)"}
 
 
 def _settings_keyboard(output_format: str, upscale: str) -> InlineKeyboardMarkup:
@@ -159,7 +159,7 @@ def _settings_keyboard(output_format: str, upscale: str) -> InlineKeyboardMarkup
         ],
         [
             _btn("Keep original", "su:original", upscale, "original"),
-            _btn("Upscale (low)", "su:low", upscale, "low"),
+            InlineKeyboardButton("🔜 Upscale (low)", callback_data="soon"),
         ],
     ])
 
@@ -168,7 +168,7 @@ def _settings_text(output_format: str, upscale: str) -> str:
     return (
         "⚙️ *Output Settings*\n\n"
         f"📤 Format: *{_OUTPUT_LABELS[output_format]}*\n"
-        f"🔍 Upscaling: *{_UPSCALE_LABELS[upscale]}*\n\n"
+        "🔍 Upscaling: *Keep original* _(more options coming soon)_\n\n"
         "Tap a button to change:"
     )
 
@@ -186,20 +186,22 @@ async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def settings_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
-    await query.answer()
     user_id = update.effective_user.id
     data = query.data
+
+    if data == "soon":
+        await query.answer("Coming soon! This option will be available in a future update.")
+        return
+
+    await query.answer()
 
     if data.startswith("sf:"):
         fmt = data[3:]
         if fmt not in _OUTPUT_LABELS:
             return
         await db.set_output_format(user_id, fmt)
-    elif data.startswith("su:"):
-        upscale_val = data[3:]
-        if upscale_val not in _UPSCALE_LABELS:
-            return
-        await db.set_upscale(user_id, upscale_val)
+    elif data == "su:original":
+        await db.set_upscale(user_id, "original")
     else:
         return
 
@@ -226,6 +228,23 @@ async def choose_model(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 # ── ZIP flush job ────────────────────────────────────────────────────────────
 
+def _zip_filename(bot_data: dict, user_id: int, today: date | None = None) -> str:
+    """Return a unique zip filename for this user, incrementing a per-day counter.
+
+    First zip of the day:  cleaned_may30.zip
+    Second zip:            cleaned_may30_1.zip
+    Third zip:             cleaned_may30_2.zip
+    """
+    if today is None:
+        today = date.today()
+    date_str = today.strftime("%b%d").lower()
+    counter_key = f"_zc_{user_id}_{today.isoformat()}"
+    n = bot_data.get(counter_key, 0)
+    bot_data[counter_key] = n + 1
+    base = f"cleaned_{date_str}"
+    return f"{base}.zip" if n == 0 else f"{base}_{n}.zip"
+
+
 async def _flush_zip_job(context: ContextTypes.DEFAULT_TYPE) -> None:
     buf_key = context.job.data["buf_key"]
     chat_id = context.job.data["chat_id"]
@@ -243,13 +262,14 @@ async def _flush_zip_job(context: ContextTypes.DEFAULT_TYPE) -> None:
         await context.bot.send_document(chat_id=chat_id, document=bio, filename=f"cleaned.{ext}")
         return
 
+    filename = _zip_filename(context.bot_data, chat_id)
     zf_buf = io.BytesIO()
     with zipfile.ZipFile(zf_buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for i, (img_bytes, ext) in enumerate(results, 1):
             zf.writestr(f"cleaned_{i:03d}.{ext}", img_bytes)
     zf_buf.seek(0)
-    zf_buf.name = "cleaned_images.zip"
-    await context.bot.send_document(chat_id=chat_id, document=zf_buf, filename="cleaned_images.zip")
+    zf_buf.name = filename
+    await context.bot.send_document(chat_id=chat_id, document=zf_buf, filename=filename)
 
 
 # ── Image processing ─────────────────────────────────────────────────────────
