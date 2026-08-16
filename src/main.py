@@ -1,5 +1,4 @@
 import logging
-import os
 import re
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
@@ -7,13 +6,13 @@ from pathlib import Path
 from telegram import BotCommand
 from telegram.ext import (
     ApplicationBuilder,
+    CallbackQueryHandler,
     CommandHandler,
-    ConversationHandler,
     MessageHandler,
     filters,
 )
 
-from src.config import HOST_OPENROUTER_KEY, TELEGRAM_BOT_TOKEN
+from src.config import TELEGRAM_BOT_TOKEN
 from src.database import init_db
 from src import handlers
 
@@ -48,8 +47,8 @@ logging.getLogger().addHandler(error_handler)
 logger = logging.getLogger(__name__)
 logger.info(f"Persistent error logging enabled → {error_log_path}")
 
-# Redact anything that looks like an API key from logs (OpenRouter keys are sk-or-…).
-_API_KEY_RE = re.compile(r"(sk-or-[A-Za-z0-9_\-]{10,}|sk-[A-Za-z0-9_\-]{20,})")
+# Redact common API-key-looking strings from logs.
+_API_KEY_RE = re.compile(r"(AIza[0-9A-Za-z_\-]{20,}|sk-[A-Za-z0-9_\-]{20,})")
 
 
 class _RedactApiKeys(logging.Filter):
@@ -69,37 +68,13 @@ logging.getLogger().addFilter(_RedactApiKeys())
 async def _post_init(app) -> None:
     await init_db()
     await app.bot.set_my_commands([
-        BotCommand("start", "What this bot does"),
-        BotCommand("status", "Free images remaining / current model"),
-        BotCommand("setup", "Add your own OpenRouter API key"),
-        BotCommand("model", "Choose the AI model"),
-        BotCommand("forget", "Delete all your stored data"),
-        BotCommand("cancel", "Cancel the current operation"),
+        BotCommand("settings", "Settings"),
+        BotCommand("speak", "Text-to-speech voice message"),
+        BotCommand("cancel", "Cancel current action"),
+        BotCommand("support", "Report an issue / feedback"),
+        BotCommand("push_the_horses", "Push the horses"),
+        BotCommand("forget", "Delete my data"),
     ])
-    if not HOST_OPENROUTER_KEY:
-        logging.getLogger(__name__).warning(
-            "HOST_OPENROUTER_KEY is not set — the free tier is disabled; users must "
-            "run /setup with their own key before processing any images."
-        )
-
-
-def build_setup_wizard() -> ConversationHandler:
-    return ConversationHandler(
-        entry_points=[
-            CommandHandler("setup", handlers.start_setup, filters.ChatType.PRIVATE),
-            CommandHandler("model", handlers.choose_model, filters.ChatType.PRIVATE),
-        ],
-        states={
-            handlers.ASK_KEY: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.receive_key)
-            ],
-            handlers.ASK_MODEL: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, handlers.receive_model)
-            ],
-        },
-        fallbacks=[CommandHandler("cancel", handlers.cancel)],
-        conversation_timeout=300,
-    )
 
 
 def main() -> None:
@@ -107,17 +82,25 @@ def main() -> None:
         ApplicationBuilder()
         .token(TELEGRAM_BOT_TOKEN)
         .post_init(_post_init)
+        .job_queue(None)
         .build()
     )
 
-    app.add_handler(CommandHandler("start", handlers.start, filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("help", handlers.help_command, filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("status", handlers.status, filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("settings", handlers.settings, filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("speak", handlers.speak, filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("cancel", handlers.cancel, filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("support", handlers.support, filters.ChatType.PRIVATE))
+    app.add_handler(CommandHandler("push_the_horses", handlers.push_the_horses, filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("forget", handlers.forget, filters.ChatType.PRIVATE))
-    app.add_handler(build_setup_wizard())
+    app.add_handler(CallbackQueryHandler(handlers.settings_callback, pattern=r"^settings:"))
+    app.add_handler(CallbackQueryHandler(handlers.forget_callback, pattern=r"^forget:"))
+    app.add_handler(
+        MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handlers.handle_settings_text)
+    )
 
-    # Images arrive as photos or as image documents. Each message is processed
-    # independently, so albums/batches just produce one cleaned image per input.
+
+
+
     image_filter = filters.PHOTO | filters.Document.IMAGE
     app.add_handler(MessageHandler(image_filter & filters.ChatType.PRIVATE, handlers.handle_image))
 

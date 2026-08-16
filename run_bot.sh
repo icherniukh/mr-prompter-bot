@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 #
-# Simple runner script
+# Runner script
 # Usage:
-#   ./run_bot.sh                    # legacy Telegram bot (OpenRouter)
-#   ./run_bot.sh --gemini <images>  # Gemini 2.5 free tool (recommended)
+#   ./run_bot.sh                    # Telegram bot (primary product entrypoint)
+#   ./run_bot.sh --gemini <images>  # standalone Gemini CLI utility
 #
 
 set -euo pipefail
@@ -34,7 +34,7 @@ echo "Starting Mr Prompter Bot..."
 
 if [[ "${1:-}" == "--gemini" ]]; then
     shift
-    echo "Running Gemini 2.5 free tool..."
+    echo "Running standalone Gemini CLI utility..."
     exec python scripts/gemini_25_free_watermark_remover.py "$@"
 else
     exec python -m src.main

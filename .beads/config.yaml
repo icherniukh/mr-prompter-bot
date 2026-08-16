@@ -66,3 +66,19 @@
 # - github.token    → use GITHUB_TOKEN env var instead
 
 sync.remote: "git+https://github.com/icherniukh/mr-prompter-bot.git"
+
+dolt.auto-commit: "on"
+
+export.git-add: true
+
+validation.on-close: "warn"
+
+no-push: false
+
+validation.on-create: "warn"
+
+validation.on-sync: "warn"
+
+export.auto: true
+
+federation.remote: "git+https://github.com/icherniukh/mr-prompter-bot.git"

@@ -1,115 +1,144 @@
-# Mr Prompter — batch watermark / overlay removal bot
+# Mr Prompter — Telegram image cleanup bot
 
-A functional Telegram bot. Send it a batch of images and it returns the same
-images with watermarks, logos, text overlays, captions and labels removed —
-each image processed independently. No prompt or instructions required.
+Mr Prompter is a Telegram bot for Gemini-backed image cleanup. It accepts image
+messages and returns processed versions with post-added overlays such as logos,
+captions, labels, and similar visual elements reduced or removed when possible.
 
-**Current path for friends (recommended):** Use the standalone Gemini 2.5 Flash Image tool below. No user keys, no 25-image limit, full fidelity.
+The product is the Telegram bot. The bot is now Gemini-only.
+
+## Current architecture
 
 ```mermaid
 flowchart LR
-    U([User]) -- sends images --> B[Bot]
-    B -- free tier? --> Q{free_used < 25?}
-    Q -- yes --> H[Host OpenRouter key]
-    Q -- no --> K[User's own key /setup]
-    H & K -- image + fixed instruction --> OR[OpenRouter image model]
-    OR -- cleaned image --> B
-    B -- one cleaned image per input --> U
+    U([User]) -- sends photos or image files --> T[Telegram bot]
+    T --> S[Per-user settings]
+    S --> GM[Gemini 2.5 Flash Image]
+    GM --> T
+    T --> U
 ```
 
 ## How it works
 
-1. A user sends one or more images (as photos, or as files for best quality).
-2. Each image is processed independently and the cleaned version is sent back —
-   so a batch of N images yields N cleaned images.
-3. The first **25 images per user** are processed on the host's shared
-   OpenRouter key (`HOST_OPENROUTER_KEY`). After that, the user runs `/setup`
-   to add their own OpenRouter key and continues with no limit.
-
-A single fixed instruction drives every call (see `REMOVAL_INSTRUCTION` in
-`src/engine.py`); the user never writes a prompt. Any image caption is ignored.
-
-## Why an image-output model
-
-Removing a watermark means *returning a new, edited image* — not describing one.
-A plain text/vision LLM can only read an image, so this bot uses OpenRouter
-**image-output (editing) models**.
-
-Current shortlist (in `src/config.py` and `MODEL_SHORTLIST` env var) contains
-the models we are actively evaluating for watermark/overlay removal quality.
-
-**Cost-effective recommendations** (as of late 2026 research):
-- `black-forest-labs/flux.2-klein-4b` — Currently one of the cheapest strong options.
-- `sourceful/riverflow-v2-fast` — Excellent speed/price balance.
-- `recraft/recraft-v4.1-utility` — Best control via `image_config.strength` for conservative edits that don't destroy real signage.
-
-The more expensive models (Gemini Pro previews, GPT-5.4 Image, Grok Imagine, FLUX.2 Pro/Max) can be used when higher quality is required.
-
-**Important**: Real usage requires empirical testing. Only image-output / image-editing models are valid in the shortlist.
-
-A future lower-cost architecture may use a two-stage pipeline (cheap detection model → precise masked inpainting) instead of full image-to-image on every request.
-
-## Free tier
-
-- Counted **per user, for the lifetime of their record** (`free_used` column).
-- A slot is reserved atomically *before* processing (`claim_free_slot`), so a
-  batch processed concurrently can never exceed the cap.
-- If an image fails, the slot is **refunded** (`release_free_slot`) — failures
-  don't cost the user.
-- If `HOST_OPENROUTER_KEY` is unset, the free tier is disabled and users must
-  add their own key first.
+1. A user sends one image or a batch of images in Telegram.
+2. The bot downloads each image independently and processes it with Gemini.
+3. Single images are returned immediately; Telegram albums are buffered briefly and sent back as grouped results.
+4. Users can tune prompt, output format, and rescaling preferences through `/settings`.
 
 ## Commands
 
-| Command   | What it does                                   |
-|-----------|------------------------------------------------|
-| `/start`  | What the bot does                              |
-| `/status` | Free images remaining / current model          |
-| `/setup`  | Add your own OpenRouter key, then pick a model |
-| `/model`  | Change the AI model                            |
-| `/forget` | Delete your stored key, model, and usage count |
-| `/cancel` | Cancel the current operation                   |
+| Command | What it does |
+|---|---|
+| `/settings` | Show and change prompt, output format, and rescaling settings |
+| `/speak` | Generate a voice/audio message from text (or by replying to a message) |
+| `/cancel` | Cancel any pending text input or active action |
+| `/support` | Report an issue or feedback to the support team |
+| `/forget` | Delete the user's stored data |
+| `/push_the_horses` | Run the gamified dice-roll command |
+
+
+
+## Settings
+
+The settings surface is centered on `/settings`, with inline choices for output
+format and upscaling. Choosing the prompt option switches the bot into a short
+text-entry follow-up so the next text message becomes the custom prompt.
+
+Settings currently include:
+
+- Prompt: default, custom prompt, or reset to default.
+- Output format: zip with images, images as files, or images inline.
+- Upscaling / rescaling: none, or auto full HD.
+
+Auto full HD runs after Gemini cleaning as deterministic local post-processing:
+below-Full-HD images are upscaled with aspect ratio preserved, while images that
+are already Full HD or larger are left unchanged.
+
+Upscaling uses a compact Real-ESRGAN super-resolution model (ONNX, CPU-only)
+when its weights are present, and falls back to plain Lanczos resizing
+otherwise. Fetch the weights (~5 MB) with:
+
+```bash
+./scripts/download_sr_model.sh
+```
+
+The model path can be overridden with `SR_MODEL_PATH` (default
+`models/realesr-general-x4v3.onnx`). SR inference is serialized to one image
+at a time to stay within small-VPS memory limits.
 
 ## Security
 
-- User API keys are **Fernet-encrypted at rest**. The master key lives in
-  `data/secret.key` (mode 0400), separate from `.env`, and the SQLite file is
-  restricted to `0600`.
-- Pasted keys are deleted from the chat on a best-effort basis, and logs redact
-  anything matching an OpenRouter/OpenAI key pattern.
+- The bot stores per-user settings in SQLite.
+- The SQLite database is restricted to `0600`.
+- Logs redact API-key-like strings on a best-effort basis.
 
-## Quick start (Gemini 2.5 free tool — current recommended)
+## Quick start
+
+### Telegram bot (primary)
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# add your GEMINI_API_KEY (get from https://aistudio.google.com/app/apikey)
-python scripts/gemini_25_free_watermark_remover.py /path/to/images/
 ```
 
-The old Telegram bot (OpenRouter-based) is kept as dead code for now.
+Set at minimum:
 
-For the legacy Telegram bot: see "Running in Production" below.
+- `TELEGRAM_BOT_TOKEN`
+- `GEMINI_API_KEY` for the Gemini-backed bot flow
 
-## Running in Production
-
-### Using the run script (recommended)
-
-A convenience script is provided:
+Then start the bot:
 
 ```bash
 chmod +x run_bot.sh
 ./run_bot.sh
 ```
 
-This script:
-- Activates the virtual environment (if `.venv` or `venv` exists)
-- Loads variables from `.env`
-- Starts the bot
+What `run_bot.sh` does:
 
-### Systemd autostart (recommended for servers)
+- Activates `.venv` or `venv` if present
+- Loads `.env`
+- Starts the Telegram bot (`python -m src.main`)
+
+### Standalone Gemini CLI utility
+
+This repo also includes a one-shot Gemini image cleanup script. It is a utility
+for batch processing outside Telegram, not the main product surface.
+
+```bash
+python scripts/gemini_25_free_watermark_remover.py /path/to/images/
+python scripts/gemini_25_free_watermark_remover.py photo.jpg folder/ --prompt-file prompts/conservative-watermark-removal.txt
+```
+
+You can also run it through the wrapper script:
+
+```bash
+./run_bot.sh --gemini /path/to/images/
+```
+
+### Upscaling evaluation harness
+
+For visual comparison of upscaling settings, run the offline-first harness over
+one or more image files or folders. Local-only runs do not call Gemini.
+
+```bash
+pip install pillow
+python scripts/evaluate_upscaling_quality.py /path/to/images/ --factors 2,3,4 --resamplers lanczos,bicubic
+```
+
+Outputs are written under `data/upscaling-evals/<timestamp>/outputs/` with a
+`manifest.json` describing every generated or skipped strategy.
+
+Gemini repair/finish strategies are opt-in and require both a flag and an API
+key:
+
+```bash
+GEMINI_API_KEY=... python scripts/evaluate_upscaling_quality.py /path/to/images/ --enable-gemini
+```
+
+## Production
+
+### Systemd
 
 1. Copy the example service file:
 
@@ -117,13 +146,9 @@ This script:
    sudo cp deploy/mr-prompter-bot.service /etc/systemd/system/
    ```
 
-2. Edit it to match your setup (especially `User` and `WorkingDirectory`):
+2. Edit it for your machine, especially `User` and `WorkingDirectory`.
 
-   ```bash
-   sudo nano /etc/systemd/system/mr-prompter-bot.service
-   ```
-
-3. Enable and start:
+3. Reload and start:
 
    ```bash
    sudo systemctl daemon-reload
@@ -139,40 +164,24 @@ This script:
    sudo systemctl restart mr-prompter-bot
    ```
 
-The service is configured to restart automatically on failure.
+The service file currently starts the Telegram bot via `run_bot.sh`.
 
-### Error Telemetry
+## Logs
 
-All uncaught errors are permanently logged to disk for future analysis:
+Uncaught errors are logged to disk for post-mortem analysis:
 
-- Gemini 2.5 free tool: `data/logs/gemini_free_errors.log`
-- Legacy Telegram bot: `data/logs/errors.log`
+- Telegram bot: `data/logs/errors.log`
+- Standalone Gemini CLI utility: `data/logs/gemini_free_errors.log`
 
-Both use rotating file handlers (5 MB files, several backups). These files are very useful for post-mortem analysis when something goes wrong in production.
-
-### Running the Gemini 2.5 free tool
-
-```bash
-# One-shot
-python scripts/gemini_25_free_watermark_remover.py photo.jpg folder/ --prompt-file prompts/conservative-watermark-removal.txt
-
-# With the run script (loads .env)
-./run_bot.sh --gemini /path/to/images/
-# (edit run_bot.sh if you want it to default to Gemini mode)
-```
-
-For systemd, point ExecStart at a small wrapper that calls the Gemini script (or run it manually / via cron).
-
-### Running the legacy Telegram bot (OpenRouter)
-
-Use the sections below (run_bot.sh + systemd still point at `src.main`).
+Both use rotating log files.
 
 ## Stack
 
-- Python 3.12+, `python-telegram-bot` 21
-- `httpx` for the OpenRouter image-edit calls
-- `aiosqlite` for async SQLite, `cryptography` (Fernet) for key encryption
-- Default model: `google/gemini-2.5-flash-image` (overridable via env)
+- Python 3.12+
+- `python-telegram-bot` 21
+- `google-genai` for Gemini image generation / editing
+- `aiosqlite` for async SQLite
+- `Pillow` for deterministic local image resizing
 
 ## Tests
 
@@ -182,8 +191,14 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-Covers the database layer (including a concurrency regression proving the free
-tier can't be over-granted), the OpenRouter engine (success, missing-image, HTTP
-and network errors), config parsing, and the handler routing (free-tier
-exhaustion, own-key unlimited, failure refund, no-host-key).
+Heavy SR-model tests are opt-in on small machines. The default suite skips the
+Real-ESRGAN path unless you set `RUN_SR_MODEL_TESTS=1`.
 
+Current tests cover:
+
+- Gemini engine behavior
+- database behavior for prompt storage
+- standalone Gemini CLI utility behavior
+- startup wiring in `src.main`
+- handler behavior for the current Gemini-plus-settings bot flow, including
+  `push_the_horses`

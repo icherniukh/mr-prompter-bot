@@ -1,4 +1,4 @@
-Carefully remove ONLY artificial watermarks, logos, text overlays, captions, labels, timestamps, signatures, and other superimposed graphics that appear to have been added after the original photo was taken (such as stock photo watermarks or post-processing branding).
+Clean this image by removing all superimposed graphics, digital overlay elements, corner stamps, labels, and artificial text banners that were added on top of the original photo.
 
 DO NOT remove, alter, or inpaint over any text, signs, logos, numbers, or markings that are physically part of the real-world scene, including building names, addresses, entrance signage, architectural details, or any other legitimate environmental text.
 

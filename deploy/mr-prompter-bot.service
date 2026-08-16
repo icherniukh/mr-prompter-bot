@@ -5,19 +5,20 @@ After=network.target
 [Service]
 Type=simple
 User=ivan
-WorkingDirectory=/home/ivan/proj/mr-prompter-bot
-ExecStart=/home/ivan/proj/mr-prompter-bot/run_bot.sh
+WorkingDirectory=/home/ivan/repos/mr-prompter-bot
+ExecStart=/home/ivan/repos/mr-prompter-bot/run_bot.sh
 Restart=always
 RestartSec=5
 StandardOutput=journal
 StandardError=journal
 SyslogIdentifier=mr-prompter-bot
 
-# Security hardening (optional but recommended)
+# Security hardening
 NoNewPrivileges=true
 ProtectSystem=strict
 ProtectHome=read-only
 PrivateTmp=true
+ReadWritePaths=/home/ivan/repos/mr-prompter-bot/data
 
 [Install]
 WantedBy=multi-user.target

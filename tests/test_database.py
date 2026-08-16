@@ -1,6 +1,6 @@
-import asyncio
 from pathlib import Path
 
+import aiosqlite
 import pytest
 
 from src import database as db
@@ -14,68 +14,103 @@ async def fresh_db(tmp_path, monkeypatch):
 
 
 async def test_unknown_user_is_none(fresh_db):
-    assert await fresh_db.get_user(123) is None
+    assert await fresh_db.get_custom_prompt(123) is None
+    assert await fresh_db.get_tts_voice(123) is None
+    assert await fresh_db.get_user_settings(123) == {
+        "custom_prompt": None,
+        "output_format": "files",
+        "rescale_mode": "none",
+        "rescale_width": None,
+        "rescale_height": None,
+        "tts_voice": None,
+    }
+    assert await fresh_db.get_roll_max(123) == 10
 
 
-async def test_set_key_roundtrips_decrypted(fresh_db):
-    await fresh_db.set_api_key(1, "sk-or-secret")
-    user = await fresh_db.get_user(1)
-    assert user["api_key"] == "sk-or-secret"
-    assert user["free_used"] == 0
-    assert user["model"] is None
+async def test_tts_voice_roundtrips(fresh_db):
+    await fresh_db.set_tts_voice(1, "en-GB-RyanNeural")
+    assert await fresh_db.get_tts_voice(1) == "en-GB-RyanNeural"
+    settings = await fresh_db.get_user_settings(1)
+    assert settings["tts_voice"] == "en-GB-RyanNeural"
 
 
-async def test_key_is_encrypted_at_rest(fresh_db):
-    await fresh_db.set_api_key(1, "sk-or-secret")
-    import aiosqlite
 
-    async with aiosqlite.connect(fresh_db.DB_PATH) as conn:
-        async with conn.execute("SELECT api_key FROM users WHERE user_id=1") as cur:
-            (stored,) = await cur.fetchone()
-    assert "sk-or-secret" not in stored
+async def test_set_custom_prompt_roundtrips(fresh_db):
+    await fresh_db.set_custom_prompt(1, "remove billboard watermark only")
+    assert await fresh_db.get_custom_prompt(1) == "remove billboard watermark only"
 
 
-async def test_set_model(fresh_db):
-    await fresh_db.set_model(1, "google/gemini-2.5-flash-image")
-    user = await fresh_db.get_user(1)
-    assert user["model"] == "google/gemini-2.5-flash-image"
+async def test_clear_custom_prompt(fresh_db):
+    await fresh_db.set_custom_prompt(1, "custom")
+    await fresh_db.clear_custom_prompt(1)
+    assert await fresh_db.get_custom_prompt(1) is None
 
 
-async def test_claim_free_slot_respects_limit(fresh_db):
-    granted = [await fresh_db.claim_free_slot(7, limit=3) for _ in range(5)]
-    assert granted == [True, True, True, False, False]
-    user = await fresh_db.get_user(7)
-    assert user["free_used"] == 3
+async def test_output_format_roundtrips(fresh_db):
+    await fresh_db.set_output_format(1, "zip")
+    settings = await fresh_db.get_user_settings(1)
+    assert settings["output_format"] == "zip"
 
 
-async def test_claim_free_slot_is_atomic_under_concurrency(fresh_db):
-    results = await asyncio.gather(
-        *[fresh_db.claim_free_slot(9, limit=10) for _ in range(50)]
-    )
-    # Never grant more than the limit, even with everything racing at once.
-    assert sum(results) == 10
-    user = await fresh_db.get_user(9)
-    assert user["free_used"] == 10
+async def test_rescale_mode_roundtrips(fresh_db):
+    await fresh_db.set_rescale_mode(1, "auto")
+    settings = await fresh_db.get_user_settings(1)
+    assert settings["rescale_mode"] == "auto"
+    assert settings["rescale_width"] is None
+    assert settings["rescale_height"] is None
 
 
-async def test_release_refunds_slot(fresh_db):
-    await fresh_db.claim_free_slot(1, limit=2)
-    await fresh_db.claim_free_slot(1, limit=2)
-    assert (await fresh_db.get_user(1))["free_used"] == 2
-    await fresh_db.release_free_slot(1)
-    assert (await fresh_db.get_user(1))["free_used"] == 1
-    # Can claim again after a refund.
-    assert await fresh_db.claim_free_slot(1, limit=2) is True
+async def test_init_db_adds_settings_columns_for_legacy_table(tmp_path, monkeypatch):
+    db_path = Path(tmp_path) / "bot.db"
+    monkeypatch.setattr(db, "DB_PATH", db_path)
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("""
+            CREATE TABLE users (
+                user_id INTEGER PRIMARY KEY,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await conn.commit()
+
+    await db.init_db()
+
+    async with aiosqlite.connect(db_path) as conn:
+        async with conn.execute("PRAGMA table_info(users)") as cur:
+            columns = [row[1] async for row in cur]
+    assert "custom_prompt" in columns
+    assert "output_format" in columns
+    assert "rescale_mode" in columns
+    assert "rescale_width" in columns
+    assert "rescale_height" in columns
+    assert "roll_max" in columns
+    assert await db.get_roll_max(1) == 10
 
 
-async def test_release_never_goes_negative(fresh_db):
-    await fresh_db.set_api_key(1, "k")
-    await fresh_db.release_free_slot(1)
-    assert (await fresh_db.get_user(1))["free_used"] == 0
+async def test_init_db_preserves_existing_roll_max_values(tmp_path, monkeypatch):
+    db_path = Path(tmp_path) / "bot.db"
+    monkeypatch.setattr(db, "DB_PATH", db_path)
+    async with aiosqlite.connect(db_path) as conn:
+        await conn.execute("""
+            CREATE TABLE users (
+                user_id INTEGER PRIMARY KEY,
+                roll_max INTEGER NOT NULL DEFAULT 10,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        await conn.execute("INSERT INTO users (user_id, roll_max) VALUES (1, 10), (2, 11), (3, 60)")
+        await conn.commit()
+
+    await db.init_db()
+
+    assert await db.get_roll_max(1) == 10
+    assert await db.get_roll_max(2) == 11
+    assert await db.get_roll_max(3) == 60
 
 
 async def test_delete_user(fresh_db):
-    await fresh_db.set_api_key(1, "k")
+    await fresh_db.set_custom_prompt(1, "custom")
     assert await fresh_db.delete_user(1) is True
-    assert await fresh_db.get_user(1) is None
+    assert await fresh_db.get_custom_prompt(1) is None
     assert await fresh_db.delete_user(1) is False

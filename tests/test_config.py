@@ -3,25 +3,26 @@ import importlib
 from src import config
 
 
-def test_shortlist_parsing():
-    assert config._parse_shortlist("a, b ,c") == ["a", "b", "c"]
-    assert config._parse_shortlist("") == []
-
-
 def test_defaults_present():
-    assert config.FREE_TIER_LIMIT >= 1
-    assert config.MODEL_SHORTLIST, "shortlist must not be empty"
-    assert config.DEFAULT_MODEL in config.MODEL_SHORTLIST
+    assert config.GEMINI_API_KEY
+    assert config.GEMINI_MODEL
+    assert config.SUPPORT_ACCOUNT == "@kappa_alive"
+    assert config.TTS_VOICE == "en-US-ChristopherNeural"
 
 
 def test_env_overrides(monkeypatch):
-    monkeypatch.setenv("MODEL_SHORTLIST", "x/one,x/two")
-    monkeypatch.setenv("FREE_TIER_LIMIT", "5")
+    monkeypatch.setenv("GEMINI_API_KEY", "override-key")
+    monkeypatch.setenv("GEMINI_MODEL", "gemini-test-model")
+    monkeypatch.setenv("SUPPORT_ACCOUNT", "@other_support")
+    monkeypatch.setenv("SUPPORT_CHAT_ID", "123456789")
+    monkeypatch.setenv("TTS_VOICE", "en-GB-RyanNeural")
     reloaded = importlib.reload(config)
     try:
-        assert reloaded.MODEL_SHORTLIST == ["x/one", "x/two"]
-        assert reloaded.FREE_TIER_LIMIT == 5
-        assert reloaded.DEFAULT_MODEL == "x/one"
+        assert reloaded.GEMINI_API_KEY == "override-key"
+        assert reloaded.GEMINI_MODEL == "gemini-test-model"
+        assert reloaded.SUPPORT_ACCOUNT == "@other_support"
+        assert reloaded.SUPPORT_CHAT_ID == "123456789"
+        assert reloaded.TTS_VOICE == "en-GB-RyanNeural"
     finally:
         monkeypatch.undo()
         importlib.reload(config)

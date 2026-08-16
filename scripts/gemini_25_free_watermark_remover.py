@@ -11,7 +11,7 @@ Key guarantees:
 - Removes watermarks and obvious artificial overlays
 - Always returns exactly as many images as were given (all processed)
 
-Custom prompts are supported via --prompt-file (preparation for future Telegram integration).
+Custom prompts are supported via --prompt-file.
 
 Usage:
     python scripts/gemini_25_free_watermark_remover.py data/test_images/
@@ -30,6 +30,9 @@ from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 
+from src.gemini_defaults import DEFAULT_GEMINI_IMAGE_MODEL, REMOVAL_PROMPT
+from src.gemini_engine import _sanitize_prompt
+
 load_dotenv()
 
 # Persistent error logging for the free Gemini tool
@@ -40,23 +43,7 @@ fh = RotatingFileHandler("data/logs/gemini_free_errors.log", maxBytes=2*1024*102
 fh.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
 error_logger.addHandler(fh)
 
-DEFAULT_REMOVAL_PROMPT = (
-    "Carefully remove ONLY artificial watermarks, logos, text overlays, captions, "
-    "labels, timestamps, signatures, and other superimposed graphics that appear "
-    "to have been added after the original photo was taken.\n\n"
-    "DO NOT remove, alter, or inpaint over any text, signs, logos, numbers, or "
-    "markings that are physically part of the real-world scene, including building "
-    "names, addresses, entrance signage, architectural details, or any other "
-    "legitimate environmental text.\n\n"
-    "For the areas being cleaned, seamlessly reconstruct by extending the exact "
-    "surrounding textures, lighting, shadows, colors, perspective, grain, noise, "
-    "and material properties so the result looks completely natural and untouched. "
-    "Make the edit invisible with no artifacts, halos, or inconsistencies.\n\n"
-    "CRITICAL: Preserve the exact original image dimensions, aspect ratio, "
-    "resolution, composition, framing, and pixel fidelity. Do not crop, pad, "
-    "resize, rotate, recolor, stylize, or change anything about the overall image "
-    "structure."
-)
+DEFAULT_REMOVAL_PROMPT = REMOVAL_PROMPT
 
 
 def process_single_image(
@@ -79,13 +66,15 @@ def process_single_image(
             automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
         )
 
+        sanitized_prompt = _sanitize_prompt(prompt)
         response = client.models.generate_content(
-            model="gemini-2.5-flash-image",
-            contents=[prompt, input_image],
+            model=DEFAULT_GEMINI_IMAGE_MODEL,
+            contents=[sanitized_prompt, input_image],
             config=config,
         )
 
         cleaned_bytes = None
+        text_parts = []
         if response.candidates:
             for candidate in response.candidates:
                 if candidate.content and candidate.content.parts:
@@ -93,18 +82,33 @@ def process_single_image(
                         if part.inline_data:
                             cleaned_bytes = part.inline_data.data
                             break
+                        if part.text:
+                            text_parts.append(part.text.strip())
 
         if not cleaned_bytes:
             latency = (time.time() - start) * 1000
-            print(f"✗ {image_path.name} ({latency:.0f}ms) - No image returned")
+            err_detail = f": {' '.join(text_parts)}" if text_parts else ""
+            print(f"✗ {image_path.name} ({latency:.0f}ms) - No image returned{err_detail}")
             return None
 
-        output_path = image_path.with_stem(image_path.stem + output_suffix)
-        output_path.write_bytes(cleaned_bytes)
+        import io
+        from PIL import Image
+
+        with Image.open(io.BytesIO(cleaned_bytes)) as out_img:
+            with Image.open(image_path) as in_img:
+                orig_size = in_img.size
+                orig_format = in_img.format or ("PNG" if image_path.suffix.lower() == ".png" else "JPEG")
+            if out_img.size != orig_size:
+                out_img = out_img.resize(orig_size, Image.Resampling.LANCZOS)
+            output_path = image_path.with_stem(image_path.stem + output_suffix)
+            if orig_format.upper() == "JPEG" and out_img.mode not in {"RGB", "L"}:
+                out_img = out_img.convert("RGB")
+            out_img.save(output_path, format=orig_format)
 
         latency = (time.time() - start) * 1000
         print(f"✓ {image_path.name} ({latency:.0f}ms) → {output_path.name}")
         return output_path
+
 
     except Exception as e:
         latency = (time.time() - start) * 1000
@@ -182,7 +186,7 @@ def main():
         prompt = DEFAULT_REMOVAL_PROMPT
         print("Using built-in conservative watermark removal prompt")
 
-    print(f"Found {len(image_paths)} images. Processing one by one with gemini-2.5-flash-image...\n")
+    print(f"Found {len(image_paths)} images. Processing one by one with {DEFAULT_GEMINI_IMAGE_MODEL}...\n")
 
     outputs = process_images(image_paths, prompt, args.output_suffix)
 

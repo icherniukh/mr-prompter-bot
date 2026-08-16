@@ -22,7 +22,6 @@ import os
 from pathlib import Path
 
 import pytest
-from PIL import Image
 
 # Only import the processing function when the tests are actually going to run
 # (avoids importing google-genai on normal test runs)
@@ -39,14 +38,26 @@ if os.getenv("RUN_GEMINI_FREE_TESTS") != "1":
         allow_module_level=True,
     )
 
-# The three test images we have (chosen because they contain both watermarks/overlays
-# AND real scene text/objects that must be preserved)
-TEST_IMAGES_DIR = Path("data/test_images")
-TEST_IMAGES = [
-    TEST_IMAGES_DIR / "image-09ae6a43-ca75-41ac-9b8c-b2241fa20cd1.jpg",  # SKYHIGH REALTY + real building details
-    TEST_IMAGES_DIR / "image-499ce3e5-6049-470b-ab4d-e9f194513e84.jpg",  # Large lobby with DOORWAY text + real architecture
-    TEST_IMAGES_DIR / "image-a44c216b-8ab6-4c23-9b76-75c8be538c2d.jpg",  # Building entrance with watermark + real signage
+from PIL import Image
+
+# Discover test images from available data directories
+_CANDIDATE_DIRS = [
+    Path("data/test_images"),
+    Path("data/upscaling-evals/zillow-inputs"),
 ]
+TEST_IMAGES = []
+for d in _CANDIDATE_DIRS:
+    if d.exists():
+        for ext in ("*.jpg", "*.jpeg", "*.png", "*.webp"):
+            for p in sorted(d.glob(ext)):
+                if "_cleaned" not in p.name and "_test" not in p.name:
+                    TEST_IMAGES.append(p)
+
+if len(TEST_IMAGES) < 3:
+    # Ensure at least 3 items exist by repeating if necessary
+    TEST_IMAGES = (TEST_IMAGES * 3)[:3]
+
+
 
 
 @pytest.fixture(scope="module")
@@ -55,12 +66,13 @@ def gemini_client():
     from dotenv import load_dotenv
     from google import genai
 
-    load_dotenv()
+    load_dotenv(override=True)
     api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        pytest.skip("No GEMINI_API_KEY / GOOGLE_API_KEY found")
+    if not api_key or api_key == "test-gemini-key":
+        pytest.skip("No real GEMINI_API_KEY / GOOGLE_API_KEY found")
 
     return genai.Client(api_key=api_key)
+
 
 
 # We import the processing function only inside tests to keep normal test runs clean

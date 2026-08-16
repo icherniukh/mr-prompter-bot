@@ -1,12 +1,13 @@
 import os
 import aiosqlite
 from pathlib import Path
-from cryptography.fernet import Fernet
-from src.config import ENCRYPTION_KEY
 
 DB_PATH = Path("data/bot.db")
-
-_fernet = Fernet(ENCRYPTION_KEY.encode())
+DEFAULT_OUTPUT_FORMAT = "files"
+DEFAULT_RESCALE_MODE = "none"
+DEFAULT_ROLL_MAX = 10
+VALID_OUTPUT_FORMATS = {"zip", "files", "inline"}
+VALID_RESCALE_MODES = {"none", "auto"}
 
 
 def _enforce_db_permissions() -> None:
@@ -19,30 +20,44 @@ def _enforce_db_permissions() -> None:
     except OSError:
         pass
 
-
-def _encrypt(text: str) -> str:
-    return _fernet.encrypt(text.encode()).decode()
-
-
-def _decrypt(text: str) -> str:
-    return _fernet.decrypt(text.encode()).decode()
-
-
 async def init_db() -> None:
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("""
             CREATE TABLE IF NOT EXISTS users (
                 user_id INTEGER PRIMARY KEY,
-                api_key TEXT,
-                model TEXT,
-                free_used INTEGER NOT NULL DEFAULT 0,
+                custom_prompt TEXT,
+                output_format TEXT NOT NULL DEFAULT 'files',
+                rescale_mode TEXT NOT NULL DEFAULT 'none',
+                rescale_width INTEGER,
+                rescale_height INTEGER,
+                roll_max INTEGER NOT NULL DEFAULT 10,
+                tts_voice TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
+
         """)
+        await _add_column_if_missing(db, "custom_prompt", "TEXT")
+        await _add_column_if_missing(db, "output_format", "TEXT NOT NULL DEFAULT 'files'")
+        await _add_column_if_missing(db, "rescale_mode", "TEXT NOT NULL DEFAULT 'none'")
+        await _add_column_if_missing(db, "rescale_width", "INTEGER")
+        await _add_column_if_missing(db, "rescale_height", "INTEGER")
+        await _add_column_if_missing(db, "roll_max", f"INTEGER NOT NULL DEFAULT {DEFAULT_ROLL_MAX}")
+        await _add_column_if_missing(db, "tts_voice", "TEXT")
+        await db.execute(
+            "UPDATE users SET roll_max=? WHERE roll_max IS NULL",
+            (DEFAULT_ROLL_MAX,),
+        )
         await db.commit()
     _enforce_db_permissions()
+
+
+async def _add_column_if_missing(db: aiosqlite.Connection, name: str, definition: str) -> None:
+    async with db.execute("PRAGMA table_info(users)") as cur:
+        existing = {row[1] async for row in cur}
+    if name not in existing:
+        await db.execute(f"ALTER TABLE users ADD COLUMN {name} {definition}")
 
 
 async def _ensure_user(db: aiosqlite.Connection, user_id: int) -> None:
@@ -50,79 +65,135 @@ async def _ensure_user(db: aiosqlite.Connection, user_id: int) -> None:
         "INSERT OR IGNORE INTO users (user_id) VALUES (?)", (user_id,)
     )
 
-
-async def get_user(user_id: int) -> dict | None:
-    """Return the user's record (with decrypted key), or None if not present."""
+async def get_custom_prompt(user_id: int) -> str | None:
     async with aiosqlite.connect(DB_PATH) as db:
         async with db.execute(
-            "SELECT user_id, api_key, model, free_used FROM users WHERE user_id=?",
+            "SELECT custom_prompt FROM users WHERE user_id=?", (user_id,)
+        ) as cur:
+            row = await cur.fetchone()
+    return row[0] if row else None
+
+
+async def set_custom_prompt(user_id: int, prompt: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _ensure_user(db, user_id)
+        await db.execute(
+            "UPDATE users SET custom_prompt=?, updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
+            (prompt, user_id),
+        )
+        await db.commit()
+
+
+async def get_tts_voice(user_id: int) -> str | None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            "SELECT tts_voice FROM users WHERE user_id=?", (user_id,)
+        ) as cur:
+            row = await cur.fetchone()
+    return row[0] if row else None
+
+
+async def set_tts_voice(user_id: int, voice: str) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _ensure_user(db, user_id)
+        await db.execute(
+            "UPDATE users SET tts_voice=?, updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
+            (voice, user_id),
+        )
+        await db.commit()
+
+
+async def get_user_settings(user_id: int) -> dict:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute(
+            """
+            SELECT custom_prompt, output_format, rescale_mode, rescale_width, rescale_height, tts_voice
+            FROM users
+            WHERE user_id=?
+            """,
             (user_id,),
         ) as cur:
             row = await cur.fetchone()
     if not row:
-        return None
-    user_id, enc_key, model, free_used = row
+        return {
+            "custom_prompt": None,
+            "output_format": DEFAULT_OUTPUT_FORMAT,
+            "rescale_mode": DEFAULT_RESCALE_MODE,
+            "rescale_width": None,
+            "rescale_height": None,
+            "tts_voice": None,
+        }
+
+    output_format = row[1] if row[1] in VALID_OUTPUT_FORMATS else DEFAULT_OUTPUT_FORMAT
+    rescale_mode = row[2] if row[2] in VALID_RESCALE_MODES else DEFAULT_RESCALE_MODE
     return {
-        "user_id": user_id,
-        "api_key": _decrypt(enc_key) if enc_key else None,
-        "model": model,
-        "free_used": free_used,
+        "custom_prompt": row[0],
+        "output_format": output_format,
+        "rescale_mode": rescale_mode,
+        "rescale_width": row[3],
+        "rescale_height": row[4],
+        "tts_voice": row[5],
     }
 
 
-async def set_api_key(user_id: int, api_key: str) -> None:
+
+async def set_output_format(user_id: int, output_format: str) -> None:
+    if output_format not in VALID_OUTPUT_FORMATS:
+        raise ValueError(f"Unsupported output format: {output_format}")
     async with aiosqlite.connect(DB_PATH) as db:
         await _ensure_user(db, user_id)
         await db.execute(
-            "UPDATE users SET api_key=?, updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
-            (_encrypt(api_key), user_id),
+            "UPDATE users SET output_format=?, updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
+            (output_format, user_id),
         )
         await db.commit()
 
 
-async def set_model(user_id: int, model: str) -> None:
+async def set_rescale_mode(
+    user_id: int,
+    mode: str,
+    width: int | None = None,
+    height: int | None = None,
+) -> None:
+    if mode not in VALID_RESCALE_MODES:
+        raise ValueError(f"Unsupported rescale mode: {mode}")
+    width = None
+    height = None
+
     async with aiosqlite.connect(DB_PATH) as db:
         await _ensure_user(db, user_id)
         await db.execute(
-            "UPDATE users SET model=?, updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
-            (model, user_id),
+            """
+            UPDATE users
+            SET rescale_mode=?, rescale_width=?, rescale_height=?, updated_at=CURRENT_TIMESTAMP
+            WHERE user_id=?
+            """,
+            (mode, width, height, user_id),
         )
         await db.commit()
 
 
-async def claim_free_slot(user_id: int, limit: int) -> bool:
-    """Atomically reserve one free-tier image slot for the user.
-
-    Returns True if a slot was granted (free_used was below the limit and is
-    now incremented), False if the user has exhausted their free quota. The
-    UPDATE ... WHERE free_used < limit guard makes this safe under the
-    concurrency of a batch processed in parallel — no slot is ever double-spent.
-    Call release_free_slot() if the work the slot was reserved for fails.
-    """
-    async with aiosqlite.connect(DB_PATH, isolation_level=None) as db:
-        await db.execute("PRAGMA busy_timeout=5000")
-        await db.execute("BEGIN IMMEDIATE")
-        try:
-            await _ensure_user(db, user_id)
-            cur = await db.execute(
-                "UPDATE users SET free_used = free_used + 1, updated_at=CURRENT_TIMESTAMP "
-                "WHERE user_id=? AND free_used < ?",
-                (user_id, limit),
-            )
-            granted = cur.rowcount > 0
-            await db.execute("COMMIT")
-        except Exception:
-            await db.execute("ROLLBACK")
-            raise
-    return granted
-
-
-async def release_free_slot(user_id: int) -> None:
-    """Refund a previously reserved free slot (e.g. after a failed image)."""
+async def clear_custom_prompt(user_id: int) -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute(
-            "UPDATE users SET free_used = MAX(free_used - 1, 0), updated_at=CURRENT_TIMESTAMP "
-            "WHERE user_id=?",
+            "UPDATE users SET custom_prompt=NULL, updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
+            (user_id,),
+        )
+        await db.commit()
+
+
+async def get_roll_max(user_id: int) -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        async with db.execute("SELECT roll_max FROM users WHERE user_id=?", (user_id,)) as cur:
+            row = await cur.fetchone()
+    return row[0] if row and row[0] is not None else DEFAULT_ROLL_MAX
+
+
+async def increment_roll_max(user_id: int) -> None:
+    async with aiosqlite.connect(DB_PATH) as db:
+        await _ensure_user(db, user_id)
+        await db.execute(
+            "UPDATE users SET roll_max = roll_max + 1, updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
             (user_id,),
         )
         await db.commit()
