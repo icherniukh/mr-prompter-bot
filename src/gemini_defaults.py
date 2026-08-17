@@ -1,4 +1,14 @@
 DEFAULT_GEMINI_IMAGE_MODEL = "gemini-2.5-flash-image"
+DEFAULT_GEMINI_VISION_MODEL = "gemini-2.5-flash"
+
+DETECTION_PROMPT = (
+    "Find every superimposed graphic overlay added on top of this photo: digital "
+    "watermarks, corner stamps, logos, labels, and artificial text banners.\n\n"
+    "Do not include real-world signs, building text, address numbers, or physical "
+    "objects that are part of the original scene — only things digitally added "
+    "on top of the photo.\n\n"
+    "Return a bounding box for each one you find."
+)
 
 REMOVAL_PROMPT = (
     "Clean this image by removing all superimposed graphics, digital overlay elements, "

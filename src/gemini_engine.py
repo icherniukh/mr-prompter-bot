@@ -8,6 +8,8 @@ from google.genai import types
 from src.config import GEMINI_API_KEY, GEMINI_MODEL
 from src.errors import ProcessingError
 from src.gemini_defaults import REMOVAL_PROMPT
+from src.local_inpaint import inpaint_regions
+from src.overlay_detect import detect_overlay_regions
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +54,32 @@ def _process_sync(image_bytes: bytes, mime_type: str, prompt: str) -> bytes:
 
 
 async def remove_overlays_gemini(image_bytes: bytes, mime_type: str, prompt: str | None = None) -> bytes:
-    """Call Gemini 2.5 Flash Image to remove overlays. Raises ProcessingError on failure."""
+    """Remove overlays at zero Gemini spend: a free-tier Gemini vision call locates
+    them, then a local MI-GAN model paints them out. Raises ProcessingError on failure.
+
+    Gemini's image-generation models (including gemini-2.5-flash-image) lost their
+    free tier; only vision/text input is still free. See remove_overlays_gemini_paid
+    for the old single paid-call path, kept as a manual fallback.
+    """
+    boxes = await detect_overlay_regions(image_bytes, mime_type, prompt)
+    if not boxes:
+        raise ProcessingError("No overlays detected to remove.")
+
+    cleaned = await asyncio.to_thread(inpaint_regions, image_bytes, mime_type, boxes)
+    if cleaned is None:
+        raise ProcessingError(
+            "Overlays were detected but local inpainting is unavailable. "
+            "Run scripts/download_migan_model.sh to enable it."
+        )
+    return cleaned
+
+
+async def remove_overlays_gemini_paid(image_bytes: bytes, mime_type: str, prompt: str | None = None) -> bytes:
+    """Old paid path: a single Gemini image-generation call removes overlays directly.
+
+    Not used by default -- gemini-2.5-flash-image no longer has a free tier. Kept as a
+    manual fallback for cases where the local/free hybrid pipeline isn't good enough.
+    """
     effective_prompt = prompt or REMOVAL_PROMPT
     try:
         return await asyncio.to_thread(_process_sync, image_bytes, mime_type, effective_prompt)

@@ -6,23 +6,60 @@ captions, labels, and similar visual elements reduced or removed when possible.
 
 The product is the Telegram bot. The bot is now Gemini-only.
 
+**Note on cost:** Google removed the free tier for all Gemini image-generation
+models (including `gemini-2.5-flash-image`) in early 2026 — image editing now
+requires a billed project. Gemini's vision/text input is still free, so the
+default pipeline is a zero-spend hybrid instead: a free Gemini vision call
+locates overlays, and a local CPU model (MI-GAN, ONNX) paints them out. See
+[Overlay removal pipeline](#overlay-removal-pipeline) below. The old
+single-call paid path (`remove_overlays_gemini_paid` in `src/gemini_engine.py`)
+is kept in the code as a manual fallback but is not used by default.
+
 ## Current architecture
 
 ```mermaid
 flowchart LR
     U([User]) -- sends photos or image files --> T[Telegram bot]
     T --> S[Per-user settings]
-    S --> GM[Gemini 2.5 Flash Image]
-    GM --> T
+    S --> GV[Gemini vision: locate overlays, free tier]
+    GV --> MI[MI-GAN local inpaint, CPU]
+    MI --> T
     T --> U
 ```
 
 ## How it works
 
 1. A user sends one image or a batch of images in Telegram.
-2. The bot downloads each image independently and processes it with Gemini.
+2. The bot downloads each image, asks Gemini (free vision call) where the overlays are, then removes them locally with MI-GAN.
 3. Single images are returned immediately; Telegram albums are buffered briefly and sent back as grouped results.
 4. Users can tune prompt, output format, and rescaling preferences through `/settings`.
+
+## Overlay removal pipeline
+
+Overlay/watermark removal runs in two steps, both free of Gemini image-generation
+spend:
+
+1. **Detect** (`src/overlay_detect.py`): a free-tier Gemini vision call
+   (`gemini-2.5-flash` by default, override with `GEMINI_VISION_MODEL`) returns
+   bounding boxes for detected overlays. The user's custom prompt (if set via
+   `/settings`) is passed through as extra guidance to the detector.
+2. **Inpaint** (`src/local_inpaint.py`): a local MI-GAN ONNX model (CPU) fills
+   in the detected regions. Pixels outside the (padded) detected regions are
+   left byte-identical to the original — only the overlay areas are touched.
+
+Fetch the MI-GAN weights (~27 MB) with:
+
+```bash
+./scripts/download_migan_model.sh
+```
+
+The model path can be overridden with `MIGAN_MODEL_PATH` (default
+`models/migan_pipeline_v2.onnx`). If nothing is detected, or the local model
+isn't downloaded, the bot reports a clear error rather than silently falling
+back to a paid Gemini call. Inference is serialized to one image at a time and
+crops are capped at 768px on the long edge before inference — both tuned to
+stay within the small-VPS memory budget (verified empirically: MI-GAN's own
+peak footprint is ~470 MB RSS on a 2 vCPU / ~1.9 GB RAM box).
 
 ## Commands
 
@@ -179,7 +216,8 @@ Both use rotating log files.
 
 - Python 3.12+
 - `python-telegram-bot` 21
-- `google-genai` for Gemini image generation / editing
+- `google-genai` for Gemini vision (overlay detection) and voice (`/speak`)
+- `onnxruntime` for local MI-GAN inpainting and Real-ESRGAN upscaling (CPU)
 - `aiosqlite` for async SQLite
 - `Pillow` for deterministic local image resizing
 
@@ -191,12 +229,17 @@ pip install -r requirements-dev.txt
 pytest
 ```
 
-Heavy SR-model tests are opt-in on small machines. The default suite skips the
-Real-ESRGAN path unless you set `RUN_SR_MODEL_TESTS=1`.
+Heavy model tests are opt-in on small machines. The default suite skips the
+Real-ESRGAN path unless you set `RUN_SR_MODEL_TESTS=1`, and skips the MI-GAN
+inpainting path unless you set `RUN_MIGAN_MODEL_TESTS=1` (after running
+`./scripts/download_migan_model.sh`).
 
 Current tests cover:
 
-- Gemini engine behavior
+- Gemini engine behavior (overlay detection + local inpaint orchestration, and
+  the old paid single-call path kept as a fallback)
+- overlay detection (`src/overlay_detect.py`) and local inpainting
+  (`src/local_inpaint.py`)
 - database behavior for prompt storage
 - standalone Gemini CLI utility behavior
 - startup wiring in `src.main`

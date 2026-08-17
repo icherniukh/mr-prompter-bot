@@ -20,6 +20,12 @@ This project uses **bd** (beads) for issue tracking. Run `bd prime` for full wor
 ## Current Architecture Guidance
 
 - The intended direction is **Gemini-backed Telegram bot + per-user settings**.
+- Gemini's image-generation models lost their free tier in early 2026. Overlay
+  removal now runs as a free hybrid: a free-tier Gemini vision call detects
+  overlay regions (`src/overlay_detect.py`), and a local MI-GAN ONNX model
+  removes them (`src/local_inpaint.py`), orchestrated from
+  `remove_overlays_gemini` in `src/gemini_engine.py`. The old single-call paid
+  path is kept as `remove_overlays_gemini_paid`, unused by default.
 - The current operator-facing command surface includes `/settings`, `/speak`, `/cancel`, `/support`, `/forget`, and `/push_the_horses`.
 
 

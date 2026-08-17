@@ -1,6 +1,11 @@
 #!/usr/bin/env python3
 """
-Dedicated free-tier watermark/overlay removal tool using Gemini 2.5 Flash Image.
+Standalone batch watermark/overlay removal tool using Gemini 2.5 Flash Image.
+
+NOTE: Gemini removed the free tier for image-generation models in early 2026;
+this script now requires a billed Gemini project (~$0.039/image). The main
+Telegram bot flow no longer uses this paid path by default -- see
+src/overlay_detect.py + src/local_inpaint.py for the free hybrid pipeline.
 
 Intended as a limited prod tool for friends (no 25-image artificial limit).
 
