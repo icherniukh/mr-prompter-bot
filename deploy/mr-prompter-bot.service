@@ -1,5 +1,5 @@
 [Unit]
-Description=Mr Prompter Bot (Telegram watermark remover)
+Description=Mr Prompter Bot
 After=network.target
 
 [Service]

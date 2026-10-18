@@ -1,20 +1,23 @@
 import os
 from dotenv import load_dotenv
 
-from src.gemini_defaults import DEFAULT_GEMINI_IMAGE_MODEL, DEFAULT_GEMINI_VISION_MODEL
-
 load_dotenv()
 
-TELEGRAM_BOT_TOKEN: str = os.environ["TELEGRAM_BOT_TOKEN"].strip()
-GEMINI_API_KEY: str = (
-    os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY") or ""
-).strip()
-if not GEMINI_API_KEY:
-    raise RuntimeError("Gemini API key not found. Set GEMINI_API_KEY or GOOGLE_API_KEY.")
+DEFAULT_OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
+DEFAULT_OPENROUTER_MODEL = "openrouter/free"
 
-GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_IMAGE_MODEL).strip()
-GEMINI_VISION_MODEL: str = os.getenv("GEMINI_VISION_MODEL", DEFAULT_GEMINI_VISION_MODEL).strip()
-SUPPORT_ACCOUNT: str = os.getenv("SUPPORT_ACCOUNT", "@kappa_alive").strip()
-SUPPORT_CHAT_ID: str = os.getenv("SUPPORT_CHAT_ID", "").strip()
-DEFAULT_TTS_VOICE = "en-US-ChristopherNeural"
-TTS_VOICE: str = os.getenv("TTS_VOICE", DEFAULT_TTS_VOICE).strip()
+TELEGRAM_BOT_TOKEN: str = os.environ["TELEGRAM_BOT_TOKEN"].strip()
+OPENROUTER_API_KEY: str = (
+    os.getenv("OPENROUTER_API_KEY") or os.getenv("HOST_OPENROUTER_KEY") or ""
+).strip()
+if not OPENROUTER_API_KEY:
+    raise RuntimeError(
+        "OpenRouter API key not found. Set OPENROUTER_API_KEY or HOST_OPENROUTER_KEY."
+    )
+
+OPENROUTER_BASE_URL: str = os.getenv(
+    "OPENROUTER_BASE_URL", DEFAULT_OPENROUTER_BASE_URL
+).strip()
+# Optional override; when unset/empty, the engine dynamically discovers active
+# :free models from OpenRouter's /models catalog and caches the working one.
+OPENROUTER_MODEL: str = os.getenv("OPENROUTER_MODEL", "").strip()

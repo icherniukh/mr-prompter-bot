@@ -6,7 +6,6 @@ from pathlib import Path
 from telegram import BotCommand
 from telegram.ext import (
     ApplicationBuilder,
-    CallbackQueryHandler,
     CommandHandler,
     MessageHandler,
     filters,
@@ -48,7 +47,7 @@ logger = logging.getLogger(__name__)
 logger.info(f"Persistent error logging enabled → {error_log_path}")
 
 # Redact common API-key-looking strings from logs.
-_API_KEY_RE = re.compile(r"(AIza[0-9A-Za-z_\-]{20,}|sk-[A-Za-z0-9_\-]{20,})")
+_API_KEY_RE = re.compile(r"(sk-or-[A-Za-z0-9_\-]{10,}|AIza[0-9A-Za-z_\-]{20,}|sk-[A-Za-z0-9_\-]{20,})")
 
 
 class _RedactApiKeys(logging.Filter):
@@ -68,12 +67,7 @@ logging.getLogger().addFilter(_RedactApiKeys())
 async def _post_init(app) -> None:
     await init_db()
     await app.bot.set_my_commands([
-        BotCommand("settings", "Settings"),
-        BotCommand("speak", "Text-to-speech voice message"),
-        BotCommand("cancel", "Cancel current action"),
-        BotCommand("support", "Report an issue / feedback"),
         BotCommand("push_the_horses", "Push the horses"),
-        BotCommand("forget", "Delete my data"),
     ])
 
 
@@ -86,25 +80,10 @@ def main() -> None:
         .build()
     )
 
-    app.add_handler(CommandHandler("settings", handlers.settings, filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("speak", handlers.speak, filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("cancel", handlers.cancel, filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("support", handlers.support, filters.ChatType.PRIVATE))
     app.add_handler(CommandHandler("push_the_horses", handlers.push_the_horses, filters.ChatType.PRIVATE))
-    app.add_handler(CommandHandler("forget", handlers.forget, filters.ChatType.PRIVATE))
-    app.add_handler(CallbackQueryHandler(handlers.settings_callback, pattern=r"^settings:"))
-    app.add_handler(CallbackQueryHandler(handlers.forget_callback, pattern=r"^forget:"))
-    app.add_handler(
-        MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, handlers.handle_settings_text)
-    )
+    app.add_handler(MessageHandler(filters.ChatType.PRIVATE, handlers.handle_bullshit))
 
-
-
-
-    image_filter = filters.PHOTO | filters.Document.IMAGE
-    app.add_handler(MessageHandler(image_filter & filters.ChatType.PRIVATE, handlers.handle_image))
-
-    print("Mr Prompter watermark-removal bot started…")
+    print("Mr Prompter bullshit bot started…")
     app.run_polling()
 
 

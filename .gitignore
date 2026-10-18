@@ -3,7 +3,7 @@ __pycache__/
 *.pyc
 .env
 
-# Ignore all runtime/evaluation data, keep only the directory placeholder.
+# Ignore runtime data, keep only the directory placeholder.
 data/*
 !data/.gitkeep
 
@@ -13,13 +13,6 @@ data/*
 .beads-credential-key
 .beads/proxieddb/
 
-# One-off test images and scratch files at repo root
-image-*.jpg
-test_gemini_free_minimal.py
-
 # macOS junk
 .DS_Store
 **/.DS_Store
-
-# Local model weights (fetched by scripts/download_sr_model.sh)
-models/
